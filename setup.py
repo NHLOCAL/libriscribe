@@ -16,6 +16,10 @@ setup(
         "markdown",
         "fpdf",
         "tenacity",
+        "google-genai",  # Add the new SDK
+        "anthropic",     # Ensure other providers are listed if used
+        "rich",
+        "pick"
     ],
     entry_points={
         "console_scripts": [

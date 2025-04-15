@@ -9,7 +9,7 @@ requests
 markdown
 fpdf # For PDF generation
 anthropic
-google-generativeai
+google-genai
 requests
 tenacity
 rich
