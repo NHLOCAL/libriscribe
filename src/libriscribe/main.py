@@ -710,7 +710,8 @@ def select_language(project_knowledge_base: ProjectKnowledgeBase):
         "Japanese",
         "Russian",
         "Arabic",
-        "Hindi"
+        "Hindi",
+        "Hebrew"
     ]
     language = select_from_list("🌐 Select the language for your book:", language_options, allow_custom=True)
     project_knowledge_base.set("language", language)
