@@ -109,49 +109,47 @@ class LLMClient:
                     temperature=temperature,
                     messages=[{"role": "user", "content": prompt}]
                 )
-                # Check if content is a list and not empty before accessing index 0
                 if response.content and isinstance(response.content, list) and len(response.content) > 0:
-                     # Ensure the first element has a 'text' attribute
                      if hasattr(response.content[0], 'text'):
                          return response.content[0].text.strip()
                      else:
                          logger.error("Claude response content item missing 'text' attribute.")
-                         return "" # Or handle appropriately
+                         return ""
                 else:
                      logger.error("Unexpected Claude response format or empty content.")
-                     return "" # Or handle appropriately
-
+                     return ""
 
             elif self.llm_provider == "google_ai_studio":
-                # Use the new SDK's client method
-                generation_config = {
+                # --- FIX: Use 'config' parameter instead of 'generation_config' ---
+                generation_config_dict = {
                     "max_output_tokens": max_tokens,
                     "temperature": temperature,
+                    # Add other relevant config parameters here if needed:
+                    # "top_p": 0.9,
+                    # "top_k": 40,
                 }
-                # Use the client object initialized in _get_client
                 response = self.client.models.generate_content(
-                    model=f'models/{self.model}', # Model name needs 'models/' prefix for new SDK client
+                    model=f'models/{self.model}',
                     contents=prompt,
-                    generation_config=generation_config # Pass config dict here
+                    config=generation_config_dict # Pass the dictionary to the 'config' parameter
                 )
-                # Add error handling for potentially blocked responses or missing text
+                # --- End of FIX ---
+
+                # Error handling for response remains the same
                 if response and hasattr(response, 'text'):
                     return response.text.strip()
                 elif response and response.prompt_feedback and response.prompt_feedback.block_reason:
                     logger.warning(f"Google GenAI response blocked. Reason: {response.prompt_feedback.block_reason}")
-                    # Return a message indicating blockage, or handle differently
                     return f"[Blocked by Safety Filter: {response.prompt_feedback.block_reason}]"
-                elif response and not response.candidates: # Handle cases where response is generated but candidates list is empty
+                elif response and not response.candidates:
                     logger.warning(f"Google GenAI response finished with reason: {response.prompt_feedback.block_reason if response.prompt_feedback else 'Unknown'}")
                     return f"[Content Generation Stopped: {response.prompt_feedback.block_reason if response.prompt_feedback else 'Unknown Reason'}]"
-
                 else:
-                    # Log the full response if text is missing unexpectedly for debugging
                     logger.error(f"Google GenAI response missing text or blocked without clear reason. Full response: {response}")
-                    return "" # Return empty string on error or blocked content
-
+                    return ""
 
             elif self.llm_provider == "deepseek":
+                # ... (DeepSeek code remains the same) ...
                 headers = {
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {self.settings.deepseek_api_key}"
@@ -162,11 +160,13 @@ class LLMClient:
                     "max_tokens": max_tokens,
                     "temperature": temperature
                 }
-                response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=data, timeout=120) # Timeout
-                response.raise_for_status() # Raise for HTTP errors
+                response = requests.post("https://api.deepseek.com/v1/chat/completions", headers=headers, json=data, timeout=120)
+                response.raise_for_status()
                 return response.json()["choices"][0]["message"]["content"].strip()
 
+
             elif self.llm_provider == "mistral":
+                 # ... (Mistral code remains the same) ...
                 headers = {
                     "Content-Type": "application/json",
                     "Authorization": f"Bearer {self.settings.mistral_api_key}"
@@ -177,7 +177,6 @@ class LLMClient:
                     "max_tokens": max_tokens,
                     "temperature": temperature
                 }
-
                 response = requests.post("https://api.mistral.ai/v1/chat/completions", headers=headers, json=data, timeout=120)
                 response.raise_for_status()
                 return response.json()['choices'][0]['message']['content'].strip()
@@ -186,6 +185,11 @@ class LLMClient:
                 logger.error(f"Attempted to generate content with unsupported provider: {self.llm_provider}")
                 return ""
 
+        # Specific exception handling for Google API errors might be useful
+        except TypeError as te: # Catch the specific TypeError we encountered
+             logger.exception(f"TypeError during {self.llm_provider} API call (check arguments): {te}")
+             print(f"ERROR: {self.llm_provider} API argument error: {te}")
+             return ""
         except Exception as e:
             logger.exception(f"Error during {self.llm_provider} API call: {e}")
             print(f"ERROR: {self.llm_provider} API error: {e}")
@@ -194,17 +198,15 @@ class LLMClient:
     @retry(wait=wait_random_exponential(min=1, max=60), stop=stop_after_attempt(3))
     def generate_content_with_json_repair(self, original_prompt: str, max_tokens:int = 2000, temperature:float=0.7) -> str:
         """Generates content and attempts to repair JSON errors."""
+        # This function uses generate_content internally, so the fix above applies here too.
+        # No direct changes needed in this function itself unless its logic depends
+        # on the specific structure of the config dict, which it doesn't seem to.
         response_text = self.generate_content(original_prompt, max_tokens, temperature)
         if response_text:
-            # First, try to extract JSON directly
             json_data = extract_json_from_markdown(response_text)
             if json_data is not None:
-                # If successful, return the original response (might contain markdown)
                 return response_text
-
-            # If direct extraction failed, attempt repair
             else:
-                # Check if the response *looks* like it should contain JSON but is broken
                 if '{' in response_text and '}' in response_text:
                     logger.warning("Initial response did not contain valid JSON within markdown. Attempting repair.")
                     repair_prompt = f"""
@@ -219,30 +221,24 @@ class LLMClient:
 
                     Corrected JSON:
                     """
-                    # Use low temperature for deterministic correction
                     repaired_response = self.generate_content(repair_prompt, max_tokens=max_tokens, temperature=0.1)
-
                     if repaired_response:
-                        # Try extracting JSON from the *repaired* response
                         repaired_json_data = extract_json_from_markdown(repaired_response)
                         if repaired_json_data is not None:
                             logger.info("JSON repair successful.")
                             return repaired_response
                         else:
                             logger.error("JSON repair attempt failed to produce valid JSON.")
-                            return response_text # Return original broken text if repair fails
+                            return response_text
                     else:
                          logger.error("JSON repair prompt failed to generate a response.")
-                         return response_text # Return original broken text
+                         return response_text
                 else:
-                     # If the original response didn't look like JSON, return it as is.
-                    # Check if it was blocked by safety filter
                     if "[Blocked by Safety Filter" in response_text or "[Content Generation Stopped" in response_text:
                          logger.warning(f"Content generation was blocked or stopped: {response_text}")
                     else:
                          logger.info("Initial response did not appear to contain JSON. Returning as is.")
                     return response_text
         else:
-            # If the initial generation failed
             logger.error("Initial content generation failed for JSON repair.")
-            return "" # Return empty string if initial generation fails
+            return ""
