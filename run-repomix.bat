@@ -1,0 +1,1 @@
+npx repomix --style markdown -i "docs/"
